@@ -713,7 +713,7 @@ function connectLogs(){
   es.onerror = ()=>{
     es.close();
     if(poweringOff) return;          // 关机中，服务已主动退出，不必再重连
-    setOffline(true, '日志流断开，正在重连…');
+    setOffline(true);                // 文案沿用上面 api() 那句，别反复改字
     setTimeout(connectLogs, 1500);   // 断线重连，带上最新序号
   };
 }
