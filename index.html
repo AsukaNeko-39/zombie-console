@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>向僵尸开炮 · 实时控制台</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel-2:#1c2230; --border:#283040;
+    --text:#e6edf3; --muted:#8b949e; --dim:#6e7681;
+    --blue:#58a6ff; --green:#3fb950; --red:#f85149; --amber:#d29922; --purple:#bc8cff;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    font-size:13px; overflow:hidden;
+  }
+  .app{display:flex;flex-direction:row;gap:10px;height:100vh;padding:10px;align-items:stretch}
+  .col{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
+  .col.left{flex:0 0 238px;width:238px;overflow-y:auto;scrollbar-width:thin}
+  /* 左栏卡片一律按内容高度排，别互相挤压出内部滚动条；整列放不下时整列滚 */
+  .col.left .card{flex:0 0 auto}
+  .col.mid{flex:1 1 auto;min-width:200px;margin-right:344px}
+  /* 右栏固定钉在视口右侧，避免被 flex 溢出挤出屏幕 */
+  .col.right{position:fixed;top:10px;right:10px;bottom:10px;width:330px;z-index:5}
+  .card{
+    background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    display:flex;flex-direction:column;min-height:0;overflow:hidden;
+  }
+  .card-h{
+    padding:10px 14px;border-bottom:1px solid var(--border);
+    font-weight:600;font-size:12px;letter-spacing:.4px;color:var(--muted);
+    display:flex;align-items:center;justify-content:space-between;flex:none;
+  }
+  .card-b{padding:12px 14px;overflow:auto;min-height:0}
+
+  /* 状态 */
+  .status-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:none}
+  .dot.running{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .dot.paused{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+  .dot.error{background:var(--red);box-shadow:0 0 8px var(--red)}
+  .dot.starting,.dot.stopping{background:var(--blue);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .status-text{font-size:15px;font-weight:600}
+  .status-sub{color:var(--muted);font-size:11px;margin-top:2px;word-break:break-all}
+
+  /* 按钮 */
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  button{
+    font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;
+    border-radius:8px;border:1px solid var(--border);background:var(--panel-2);
+    color:var(--text);padding:10px 8px;transition:.15s;
+  }
+  button:hover:not(:disabled){border-color:var(--blue);background:#20293a}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  button.primary{background:#1f6feb;border-color:#1f6feb}
+  button.primary:hover:not(:disabled){background:#2a7ff5}
+  button.warn{background:#3d2f10;border-color:#6b5119;color:#f0c674}
+  button.warn:hover:not(:disabled){background:#4a3a13}
+  button.danger{background:#3d1618;border-color:#6b2226;color:#ff9a94}
+  button.danger:hover:not(:disabled){background:#4a1a1d}
+  button.power{margin-top:8px;width:100%;background:#2a1214;border-color:#7a2a2f;color:#ff9a94;font-size:12px;letter-spacing:.5px}
+  button.power:hover:not(:disabled){background:#3d171a;border-color:#b03a41;color:#ffb3ae}
+  /* 设备卡片里的小号模拟器按钮 */
+  .emu-btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px}
+  .emu-btns button{padding:6px 2px;font-size:11.5px;border-radius:7px}
+  button.emu-on{background:#12261a;border-color:#1f6b3a;color:#7ee2a8}
+  button.emu-on:hover:not(:disabled){background:#16331f;border-color:#2b8c4d}
+  button.emu-off{background:#2a1214;border-color:#7a2a2f;color:#ff9a94}
+  button.emu-off:hover:not(:disabled){background:#3d171a;border-color:#b03a41}
+  .emu-state{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);margin-top:2px}
+  .emu-state .d{width:7px;height:7px;border-radius:50%;background:#555c66;flex:none}
+  .emu-state .d.on{background:#2ecc71;box-shadow:0 0 6px #2ecc7199}
+  .emu-state .d.wait{background:#f0b429;animation:emuPulse 1.1s infinite}
+  @keyframes emuPulse{0%,100%{opacity:1}50%{opacity:.35}}
+  /* 左栏比右栏窄，卡片内边距收一点，保证三张卡在常见窗口高度里都能放下 */
+  .col.left .card-b{padding:8px 12px}
+  .col.left .card-h{padding:7px 12px}
+  .col.left{gap:9px}
+  .col.left .btns{gap:6px}
+  .col.left .btns button{padding:6px 0;font-size:12.5px}
+  .col.left .stats{gap:4px;grid-template-columns:repeat(4,1fr)}
+  .col.left .stat{padding:4px 5px;text-align:center}
+  .col.left .stat .k{font-size:10px}
+  .col.left .stat .v{font-size:14.5px}
+  .col.left .kv{padding:3px 0}
+  .col.left .status-row{margin-bottom:6px}
+  .col.left button.power{margin-top:6px;padding:6px 4px}
+  /* 关机完成后的整页蒙层 */
+  #bye{position:fixed;inset:0;background:rgba(10,12,16,.94);z-index:999;display:none;
+       flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px}
+  #bye.on{display:flex}
+  #bye h2{font-size:20px;font-weight:600;color:var(--txt)}
+  #bye p{font-size:13px;color:var(--dim);line-height:1.9;max-width:460px}
+  #bye code{background:#1b2130;border:1px solid var(--line);border-radius:4px;padding:2px 7px;color:#7ee0a8;font-size:12px}
+  button.ghost{padding:5px 10px;font-size:11px;font-weight:500;background:transparent}
+
+  /* 统计 */
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .stat{background:var(--panel-2);border-radius:8px;padding:9px 10px}
+  .stat .k{color:var(--muted);font-size:11px}
+  .stat .v{font-size:19px;font-weight:700;margin-top:1px;font-variant-numeric:tabular-nums}
+  .kv{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed #222a36;font-size:12px}
+  .kv:last-child{border-bottom:none}
+  .kv .k{color:var(--muted);flex:none}
+  .kv .v{text-align:right;word-break:break-all;font-family:Consolas,monospace;font-size:11px}
+
+  /* 日志 */
+  #log{flex:1;overflow-y:auto;padding:8px 12px;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;line-height:1.65}
+  .ln{white-space:pre-wrap;word-break:break-all;padding:1px 0;border-bottom:1px solid #141a23}
+  .ln.err{color:#ff8f88}
+  .ln.warn{color:#e3b341}
+  .ln.ok{color:#56d364}
+  .ln.info{color:#79c0ff}
+  .ln.dim{color:#6e7681}
+  .toolbar{display:flex;gap:8px;align-items:center}
+  .switch{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:11px;cursor:pointer;user-select:none}
+
+  /* 设置 */
+  .tabs{display:flex;gap:4px;padding:8px 10px 0;border-bottom:1px solid var(--border);flex:none}
+  .tab{padding:7px 11px;border-radius:7px 7px 0 0;cursor:pointer;color:var(--muted);font-size:12px;border:1px solid transparent;border-bottom:none}
+  .tab:hover{color:var(--text)}
+  .tab.active{background:var(--panel-2);color:var(--text);border-color:var(--border)}
+  .pane{display:none;padding:12px 14px;overflow:auto;flex:1;min-height:0}
+  .pane.active{display:block}
+  .field{margin-bottom:13px}
+  .field label{display:block;font-size:12px;margin-bottom:5px;color:#c9d1d9}
+  input[type=text],input[type=number],select{
+    width:100%;background:#0d1117;border:1px solid var(--border);color:var(--text);
+    border-radius:7px;padding:7px 9px;font-family:inherit;font-size:12px;outline:none;
+  }
+  input:focus,select:focus{border-color:var(--blue)}
+  .hint{color:var(--dim);font-size:11px;margin-top:4px;line-height:1.5}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  .check{display:flex;align-items:center;gap:8px;padding:7px 0;cursor:pointer;font-size:12px}
+  .check input{width:15px;height:15px;accent-color:#1f6feb;cursor:pointer}
+  .series{border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
+  .series-h{padding:8px 10px;background:var(--panel-2);display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-size:12px}
+  .series-b{display:none;padding:6px 10px;max-height:260px;overflow:auto}
+  .series.open .series-b{display:block}
+  .entry{display:flex;align-items:center;gap:8px;padding:3px 0}
+  .entry .name{flex:1;font-size:12px;color:#c9d1d9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .entry input{width:64px;flex:none;padding:4px 6px;text-align:right}
+  .badge{font-size:10px;padding:1px 7px;border-radius:99px;background:#21324a;color:#79c0ff}
+  .badge.off{background:#2d2a22;color:#a89984}
+  .save-bar{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;flex:none}
+  .save-bar button{flex:1}
+  /* 连不上本机后台时的提示条（页面托管在 GitHub Pages 时会出现） */
+  #offline{
+    position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:900;
+    display:none;align-items:center;gap:9px;flex-wrap:wrap;justify-content:center;
+    background:#2a1214;border:1px solid #7a2a2f;color:#ff9a94;border-radius:10px;
+    padding:9px 13px;font-size:12.5px;max-width:94vw;box-shadow:0 10px 30px #000a;
+  }
+  #offline.on{display:flex}
+  #offline b{color:#ffb3ae}
+  #offline input{
+    width:186px;padding:5px 8px;font-size:12px;border-radius:6px;
+    border:1px solid #7a2a2f;background:#1a1012;color:#ffd8d5;font-family:Consolas,monospace;
+  }
+  #offline button{padding:5px 11px;font-size:12px;border-radius:6px;border-color:#7a2a2f;background:#3d1618;color:#ffb3ae}
+  #offline .x{border:none;background:transparent;color:#8b6a6a;padding:0 3px;font-size:14px}
+  #toast{
+    position:fixed;left:50%;top:16px;transform:translateX(-50%) translateY(-70px);
+    background:#1f6feb;color:#fff;padding:9px 18px;border-radius:8px;font-size:12.5px;
+    font-weight:600;box-shadow:0 6px 24px #0008;transition:.25s;z-index:99;pointer-events:none;
+  }
+  #toast.show{transform:translateX(-50%) translateY(0)}
+  #toast.err{background:#b62324}
+  @media(max-width:860px){
+    body{overflow:auto}
+    .app{flex-direction:column;height:auto}
+    .col.left,.col.right{flex:0 0 auto;width:100%}
+    .col.right{position:static;width:auto}
+    .col.mid{height:55vh;min-width:0;margin-right:0}
+  }
+</style>
+</head>
+<body>
+<div id="offline">
+  <span>⚠ 没连上本机后台服务：<b id="offlineMsg">控制台没启动</b></span>
+  <input id="backendInput" spellcheck="false" placeholder="http://127.0.0.1:8770">
+  <button onclick="saveBackend()">连接</button>
+  <button class="x" onclick="hideOffline()" title="先关掉这条提示">×</button>
+</div>
+<div class="app">
+
+  <!-- 左：状态与控制 -->
+  <div class="col left">
+    <div class="card">
+      <div class="card-h">运行状态</div>
+      <div class="card-b">
+        <div class="status-row">
+          <div class="dot" id="dot"></div>
+          <div>
+            <div class="status-text" id="statusText">未启动</div>
+            <div class="status-sub" id="statusSub">等待启动指令</div>
+          </div>
+        </div>
+        <div class="btns">
+          <button class="primary" id="btnStart" onclick="act('start')">开始</button>
+          <button class="warn"    id="btnPause" onclick="act('pause')">暂停</button>
+          <button class="primary" id="btnResume" onclick="act('resume')">继续</button>
+          <button class="danger"  id="btnStop"  onclick="act('stop')">停止</button>
+        </div>
+        <button class="power" id="btnPower" onclick="powerOff()" title="停脚本 + 关画面 + 关模拟器 + 退出后台服务">⏻ 一键关机（含后台）</button>
+      </div>
+    </div>
+
+    <div class="card" style="flex:0 0 auto">
+      <div class="card-h">设备与环境</div>
+      <div class="card-b" style="padding:8px 14px">
+        <div class="kv"><span class="k">模拟器</span><span class="v" id="dvEmu">--</span></div>
+        <div class="kv"><span class="k">设备</span><span class="v" id="dvDev">--</span></div>
+        <div class="kv"><span class="k">分辨率</span><span class="v" id="dvScr">--</span></div>
+        <div class="emu-state"><span class="d" id="emuDot"></span><span id="emuText">检测中…</span></div>
+        <div class="emu-btns">
+          <button class="emu-on"  id="btnEmuStart" onclick="emuAct('start')"  title="启动模拟器实例并连接 ADB、自动打开画面">启动</button>
+          <button class="emu-off" id="btnEmuStop"  onclick="emuAct('stop')"   title="关闭模拟器实例和画面窗口（不动控制台）">关闭</button>
+          <button id="btnEmuMirror" onclick="emuAct('mirror')" title="只重新打开画面镜像窗口">看画面</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">本次统计</div>
+      <div class="card-b">
+        <div class="stats">
+          <div class="stat"><div class="k">通关</div><div class="v" id="stLevel">0</div></div>
+          <div class="stat"><div class="k">选技能</div><div class="v" id="stSkill">0</div></div>
+          <div class="stat"><div class="k">关弹窗</div><div class="v" id="stPopup">0</div></div>
+          <div class="stat"><div class="k">循环</div><div class="v" id="stLoop">0</div></div>
+        </div>
+        <div style="margin-top:8px">
+          <div class="kv"><span class="k">运行时长</span><span class="v" id="stTime">--</span></div>
+          <div class="kv"><span class="k">当前关卡</span><span class="v" id="stCur">--</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 中：日志 -->
+  <div class="col mid">
+    <div class="card" style="flex:1">
+      <div class="card-h">
+        <span>实时日志</span>
+        <div class="toolbar">
+          <label class="switch"><input type="checkbox" id="autoScroll" checked>自动滚动</label>
+          <button class="ghost" onclick="clearLog()">清空</button>
+        </div>
+      </div>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <!-- 右：设置 -->
+  <div class="col right">
+    <div class="card" style="flex:1">
+      <div class="card-h">高级设置</div>
+      <div class="tabs">
+        <div class="tab active" data-pane="run">运行参数</div>
+        <div class="tab" data-pane="skill">技能策略</div>
+        <div class="tab" data-pane="words">词条优先级</div>
+      </div>
+
+      <div class="pane active" id="pane-run">
+        <div id="runFields"></div>
+      </div>
+
+      <div class="pane" id="pane-skill">
+        <div class="field">
+          <label>选择策略</label>
+          <select id="skStrategy">
+            <option value="priority">priority · 按词条优先级（推荐）</option>
+            <option value="middle">middle · 总选中间</option>
+            <option value="random">random · 随机</option>
+            <option value="left">left · 总选左边</option>
+            <option value="right">right · 总选右边</option>
+          </select>
+          <div class="hint">priority 时才会用到下面的词条分数与系别启用状态</div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>已点降权系数</label>
+            <input type="number" id="skPickDecay" min="0" max="3" step="0.1">
+            <div class="hint">1.0 = 关闭降权（专精堆核心）</div>
+          </div>
+          <div class="field">
+            <label>依赖未满足降权</label>
+            <input type="number" id="skReqDecay" min="0" max="3" step="0.1">
+            <div class="hint">1.0 = 关闭</div>
+          </div>
+        </div>
+        <div class="field">
+          <label>启用的系别</label>
+          <div id="seriesToggles"></div>
+          <div class="hint">只勾选的系别参与打分；元素系对免疫元素 BOSS 无效</div>
+        </div>
+      </div>
+
+      <div class="pane" id="pane-words">
+        <div class="field" style="margin-bottom:8px">
+          <input type="text" id="wordSearch" placeholder="搜索词条名…">
+        </div>
+        <div id="wordList"></div>
+      </div>
+
+      <div class="save-bar">
+        <button class="ghost" onclick="reloadAll()">重新读取</button>
+        <button class="primary" onclick="saveAll()">保存并生效</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div id="bye">
+  <h2>已关机</h2>
+  <p id="byeSub">自动脚本、画面镜像、模拟器实例、控制台服务都已停止。</p>
+  <p>要重新开始，双击 <code>启动控制台.bat</code> 即可。<br>
+     这个页面可以关掉了。</p>
+</div>
+
+<script>
+/* ============ 基础工具 ============ */
+const $ = id => document.getElementById(id);
+let sinceSeq = 0, es = null, dirty = {}, fieldsBuilt = false, skillsData = null;
+
+/* ---------- 后端地址 ----------
+   页面有两种打开方式：
+     1) 本机服务自己吐出来的 http://127.0.0.1:8770/  → 同源，用相对路径
+     2) 托管在 GitHub Pages / 直接 file:// 双击打开   → 跨域调本机 8770
+   端口换过的话，在下面提示条里改一次，会记进 localStorage。 */
+const DEFAULT_BASE = 'http://127.0.0.1:8770';
+function initialBase(){
+  const saved = localStorage.getItem('zc_backend');
+  if(saved) return saved.replace(/\/+$/, '');
+  if(location.protocol === 'file:' || location.protocol === 'https:') return DEFAULT_BASE;
+  return '';                          // http 打开的：同源最稳
+}
+let API_BASE = initialBase();
+const apiUrl = p => API_BASE + p;
+
+/* ---------- 掉线提示 ---------- */
+let offlineHidden = false;
+function setOffline(on, msg){
+  const bar = $('offline');
+  if(!bar) return;
+  if(on){
+    if(msg) $('offlineMsg').textContent = msg;
+    if(offlineHidden) return;
+    $('backendInput').value = API_BASE || (location.origin + '');
+    bar.classList.add('on');
+  }else{
+    offlineHidden = false;
+    bar.classList.remove('on');
+  }
+}
+function hideOffline(){ offlineHidden = true; $('offline').classList.remove('on'); }
+function saveBackend(){
+  const v = ($('backendInput').value || '').trim().replace(/\/+$/, '');
+  if(!/^https?:\/\/[^\s]+$/.test(v)){ toast('地址要写成 http://127.0.0.1:8770 这样', true); return; }
+  localStorage.setItem('zc_backend', v);
+  API_BASE = v;
+  offlineHidden = false;
+  location.reload();
+}
+
+function toast(msg, isErr){
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = isErr ? 'show err' : 'show';
+  clearTimeout(t._tm);
+  t._tm = setTimeout(()=>{ t.className = isErr ? 'err' : ''; }, 2200);
+}
+async function api(path, body){
+  const opt = body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {};
+  let r;
+  try{
+    r = await fetch(apiUrl(path), opt);
+  }catch(_){
+    // 后台没起来 / 端口不对 / 被浏览器拦了跨域，都会走到这儿
+    setOffline(true, '后台没响应（' + (API_BASE || location.origin) + '）');
+    return {__offline:true, ok:false, error:'连不上后台服务', message:'连不上本机后台服务，先启动「启动控制台」'};
+  }
+  setOffline(false);
+  return r.json();
+}
+
+/* ============ 控制按钮 ============ */
+async function act(action){
+  const r = await api('/api/control', {action});
+  if(!r.ok) toast(r.message || '操作失败', true);
+  else toast(r.message || '完成');
+  refreshState();
+}
+
+/* ============ 模拟器 ============ */
+let emuBusy = false;
+async function emuAct(action){
+  if(emuBusy) return;
+  if(action === 'stop'){
+    const ok = confirm('关闭模拟器？\n\n会关掉画面窗口和安卓实例，控制台本身保持运行。\n（脚本还在跑的话请先点「停止」）');
+    if(!ok) return;
+  }
+  emuBusy = true;
+  const btn = $(action === 'start' ? 'btnEmuStart' : action === 'stop' ? 'btnEmuStop' : 'btnEmuMirror');
+  const old = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = action === 'start' ? '启动中' : action === 'stop' ? '关闭中' : '…'; }
+  try{
+    const r = await api('/api/emulator', {action});
+    toast(r.message || (r.ok ? '完成' : '操作失败'), !r.ok);
+  }catch(e){
+    toast('请求失败：' + e, true);
+  }
+  // 启动/关闭是后台任务，多等一会儿再放开按钮
+  setTimeout(()=>{
+    emuBusy = false;
+    if(btn){ btn.disabled = false; btn.textContent = old; }
+    refreshState();
+  }, action === 'mirror' ? 800 : 4000);
+  refreshState();
+}
+
+/* ============ 一键关机 ============ */
+let poweringOff = false;
+async function powerOff(){
+  if(poweringOff) return;
+  const ok = confirm(
+    '确定要关机吗？会依次执行：\n\n' +
+    '  1. 停止自动脚本\n' +
+    '  2. 关闭画面镜像窗口\n' +
+    '  3. 关闭模拟器实例\n' +
+    '  4. 退出控制台后台服务\n\n' +
+    '之后这个网页会断开，需要重新双击「启动控制台.bat」。'
+  );
+  if(!ok) return;
+
+  poweringOff = true;
+  const btn = $('btnPower');
+  if(btn){ btn.disabled = true; btn.textContent = '⏻ 正在关机 ...'; }
+  ['btnStart','btnPause','btnResume','btnStop'].forEach(id=>{
+    const el = $(id); if(el) el.disabled = true;
+  });
+  toast('正在关机，过程见下方日志…');
+
+  try{
+    await api('/api/shutdown', {});
+  }catch(_){
+    /* 服务可能已经退了，忽略 */
+  }
+  // 给进程收尾留点时间，再切到"已关机"界面
+  setTimeout(()=>{ $('bye').classList.add('on'); }, 2500);
+}
+
+/* ============ 状态轮询 ============ */
+const STATUS_MAP = {
+  stopped:['未启动','等待启动指令'],
+  starting:['启动中','正在连接模拟器…'],
+  running:['运行中','自动闯关中'],
+  paused:['已暂停','不截图不点击，保持连接'],
+  stopping:['停止中','等待当前循环结束…'],
+  error:['出错了','运行异常']
+};
+
+async function refreshState(){
+  if(poweringOff) return;            // 关机中不再刷新，免得把按钮状态又改回去
+  let s;
+  try{ s = await api('/api/state'); }catch(e){ return; }
+  if(!s || s.__offline || !s.state){ setOffline(true); return; }
+  const st = s.state, cfg = s.config;
+
+  const [txt, sub] = STATUS_MAP[st.status] || ['未知',''];
+  $('statusText').textContent = txt;
+  $('statusSub').textContent = st.detail || sub;
+  $('dot').className = 'dot ' + st.status;
+
+  const running = ['running','paused','starting','stopping'].includes(st.status);
+  $('btnStart').disabled  = running;
+  $('btnPause').disabled  = st.status !== 'running';
+  $('btnResume').disabled = st.status !== 'paused';
+  $('btnStop').disabled   = !running;
+
+  // 统计
+  const stt = st.stats || {};
+  $('stLevel').textContent = stt.level_cnt ?? 0;
+  $('stSkill').textContent = stt.skill_cnt ?? 0;
+  $('stPopup').textContent = stt.popup_cnt ?? 0;
+  $('stLoop').textContent  = stt.loops ?? 0;
+  $('stCur').textContent   = stt.current_level || '--';
+  $('stTime').textContent  = st.elapsed ? fmtTime(st.elapsed) : '--';
+
+  // 设备（脚本没在跑时用配置值兜底，免得整行都是 --）
+  const dv = st.device || {};
+  const emuInfo = s.emu || {};
+  $('dvEmu').textContent = dv.emulator || (emuInfo.online ? 'MuMu 实例 ' + (emuInfo.instance ?? '-') : '--');
+  $('dvDev').textContent = dv.device || cfg.device || '--';
+  $('dvScr').textContent = dv.screen || emuInfo.screen || '--';
+
+  // 模拟器状态与按钮
+  const emu = s.emu || {};
+  const emuOn = !!emu.online;
+  const emuWait = !!emu.busy;
+  const emuD = $('emuDot'), emuTip = $('emuText');
+  if(emuD && emuTip){
+    emuD.className = 'd' + (emuWait ? ' wait' : emuOn ? ' on' : '');
+    emuTip.textContent = emuWait ? '正在启动 / 关闭 …'
+                    : emuOn ? ('模拟器运行中' + (emu.mirror ? ' · 画面已开' : ' · 画面未开'))
+                            : (emu.android_started ? '开机中 …' : '模拟器未运行');
+  }
+  if(!emuBusy){
+    const bS = $('btnEmuStart'), bE = $('btnEmuStop'), bM = $('btnEmuMirror');
+    if(bS) bS.disabled = emuWait || emuOn;
+    if(bE) bE.disabled = emuWait || !emuOn;
+    if(bM) bM.disabled = emuWait || !emuOn || !!emu.mirror;
+  }
+
+  // 参数表单
+  if(!fieldsBuilt && s.fields){ buildFields(s.fields); fieldsBuilt = true; }
+  if(s.fields) syncFields(s.fields, cfg);
+}
+function fmtTime(sec){
+  const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = sec%60;
+  return (h?h+':':'') + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+/* ============ 参数表单 ============ */
+function buildFields(fields){
+  const box = $('runFields');
+  box.innerHTML = '';
+  fields.forEach(f=>{
+    const wrap = document.createElement('div');
+    wrap.className = 'field';
+    let input;
+    if(f.kind === 'bool'){
+      wrap.innerHTML = `<label class="check"><input type="checkbox" data-key="${f.key}">${f.label}</label>`;
+      input = wrap.querySelector('input');
+      input.addEventListener('change', ()=>dirty[f.key]=1);
+    } else if(f.kind === 'select'){
+      const opts = f.options.map(o=>`<option value="${o.value}">${o.text}</option>`).join('');
+      wrap.innerHTML = `<label>${f.label}${f.restart?' <span class="badge off">需重启</span>':''}</label>
+        <select data-key="${f.key}">${opts}</select>`;
+      input = wrap.querySelector('select');
+      input.addEventListener('change', ()=>dirty[f.key]=1);
+    } else {
+      const step = f.step || (f.kind==='int'?1:0.1);
+      const type = f.kind === 'text' ? 'text' : 'number';
+      wrap.innerHTML = `<label>${f.label}${f.restart?' <span class="badge off">需重启</span>':''}</label>
+        <input type="${type}" data-key="${f.key}" step="${step}" ${f.min!==undefined?`min="${f.min}"`:''} ${f.max!==undefined?`max="${f.max}"`:''}>`;
+      input = wrap.querySelector('input');
+      input.addEventListener('input', ()=>dirty[f.key]=1);
+    }
+    if(f.hint){
+      const h = document.createElement('div');
+      h.className = 'hint'; h.textContent = f.hint;
+      wrap.appendChild(h);
+    }
+    box.appendChild(wrap);
+  });
+}
+function syncFields(fields, cfg){
+  fields.forEach(f=>{
+    if(dirty[f.key]) return;
+    const el = document.querySelector(`[data-key="${f.key}"]`);
+    if(!el) return;
+    if(f.kind === 'bool') el.checked = !!cfg[f.key];
+    else el.value = cfg[f.key] ?? '';
+  });
+  if(!dirty['skill_strategy']) $('skStrategy').value = cfg.skill_strategy || 'priority';
+  if(!dirty['pick_decay']) $('skPickDecay').value = cfg.pick_decay ?? '';
+  if(!dirty['require_decay']) $('skReqDecay').value = cfg.require_decay ?? '';
+}
+
+/* ============ 技能配置 ============ */
+async function loadSkills(){
+  const d = await api('/api/skills');
+  if(d.error){ toast(d.error, true); return; }
+  skillsData = d;
+
+  if(!dirty['skill_strategy']) $('skStrategy').value = d.strategy || 'priority';
+  if(!dirty['pick_decay']) $('skPickDecay').value = d.pick_decay ?? 1;
+  if(!dirty['require_decay']) $('skReqDecay').value = d.require_decay ?? 1;
+
+  // 系别开关
+  const tbox = $('seriesToggles');
+  tbox.innerHTML = '';
+  Object.keys(d.series).forEach(name=>{
+    const on = (d.enabled||[]).includes(name);
+    const el = document.createElement('label');
+    el.className = 'check';
+    el.innerHTML = `<input type="checkbox" ${on?'checked':''} value="${name}">
+      <span>${name}</span><span class="badge ${on?'':'off'}">${Object.keys(d.series[name]).length} 词条</span>`;
+    el.querySelector('input').addEventListener('change', e=>{
+      const cur = new Set([...tbox.querySelectorAll('input:checked')].map(i=>i.value));
+      saveSeries([...cur]);
+    });
+    tbox.appendChild(el);
+  });
+
+  renderWords('');
+}
+async function saveSeries(names){
+  const r = await api('/api/skills', {type:'enabled', names});
+  if(r.ok) toast('系别已更新'); else toast(r.error||'失败', true);
+  loadSkills();
+}
+
+function renderWords(filter){
+  if(!skillsData) return;
+  const box = $('wordList');
+  box.innerHTML = '';
+  const kw = (filter||'').trim();
+  Object.entries(skillsData.series).forEach(([series, entries])=>{
+    const rows = Object.entries(entries).filter(([n])=> !kw || n.includes(kw));
+    if(!rows.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'series' + (kw ? ' open' : '');
+    const head = document.createElement('div');
+    head.className = 'series-h';
+    head.innerHTML = `<span>${series}</span><span class="badge">${rows.length}</span>`;
+    head.onclick = ()=> wrap.classList.toggle('open');
+    const body = document.createElement('div');
+    body.className = 'series-b';
+    rows.sort((a,b)=> b[1]-a[1]).forEach(([name, score])=>{
+      const row = document.createElement('div');
+      row.className = 'entry';
+      row.innerHTML = `<span class="name" title="${name}">${name}</span>
+        <input type="number" value="${score}" step="1">`;
+      const inp = row.querySelector('input');
+      inp.addEventListener('change', async ()=>{
+        const r = await api('/api/skills', {type:'score', series, name, score: Number(inp.value)});
+        if(r.ok){ entries[name] = Number(inp.value); toast(`${name} → ${inp.value}`); }
+        else toast(r.error || '保存失败', true);
+      });
+      body.appendChild(row);
+    });
+    wrap.appendChild(head); wrap.appendChild(body);
+    box.appendChild(wrap);
+  });
+  if(!box.children.length){
+    box.innerHTML = '<div class="hint">没有匹配的词条</div>';
+  }
+}
+
+/* ============ 保存 ============ */
+async function saveAll(){
+  const values = {};
+  document.querySelectorAll('#runFields [data-key]').forEach(el=>{
+    const key = el.dataset.key;
+    if(el.type === 'checkbox') values[key] = el.checked;
+    else values[key] = el.value;
+  });
+  values.skill_strategy = $('skStrategy').value;
+  values.pick_decay = $('skPickDecay').value;
+  values.require_decay = $('skReqDecay').value;
+
+  const r = await api('/api/config', {values});
+  if(r.__offline){ toast(r.message, true); return; }
+  if(r.errors && r.errors.length) toast(r.errors.join('；'), true);
+  else toast('已保存并立即生效');
+  dirty = {};
+  refreshState();
+}
+async function reloadAll(){
+  dirty = {};
+  fieldsBuilt = false;
+  await refreshState();
+  await loadSkills();
+  toast('已重新读取配置');
+}
+
+/* ============ 日志 ============ */
+function classify(line){
+  if(/❌|错误|异常|失败|Traceback|Error/.test(line)) return 'err';
+  if(/⚠|警告|未知界面/.test(line)) return 'warn';
+  if(/✅|启动成功|通关|已暂停|已继续|收到停止/.test(line)) return 'ok';
+  if(/📸|🔍/.test(line)) return 'dim';
+  if(/🔄|🎯|🚓|🏠|🛑|⏸|▶|⚙/.test(line)) return 'info';
+  return '';
+}
+function appendLine(d){
+  const log = $('log');
+  const div = document.createElement('div');
+  const cls = classify(d.line);
+  div.className = 'ln' + (cls ? ' ' + cls : '');
+  div.textContent = d.line;
+  log.appendChild(div);
+  while(log.childNodes.length > 1200) log.removeChild(log.firstChild);
+  if($('autoScroll').checked) log.scrollTop = log.scrollHeight;
+}
+function connectLogs(){
+  if(es) es.close();
+  es = new EventSource(apiUrl('/api/logs?since=' + sinceSeq));
+  es.onopen = ()=>setOffline(false);
+  es.onmessage = e=>{
+    try{
+      const d = JSON.parse(e.data);
+      appendLine(d);
+      sinceSeq = d.seq;
+    }catch(_){}
+  };
+  es.onerror = ()=>{
+    es.close();
+    if(poweringOff) return;          // 关机中，服务已主动退出，不必再重连
+    setOffline(true, '日志流断开，正在重连…');
+    setTimeout(connectLogs, 1500);   // 断线重连，带上最新序号
+  };
+}
+async function clearLog(){
+  await api('/api/logs/clear', {});
+  $('log').innerHTML = '';
+  toast('日志已清空');
+}
+
+/* ============ 初始化 ============ */
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick = ()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    $('pane-' + t.dataset.pane).classList.add('active');
+  };
+});
+$('skStrategy').addEventListener('change', ()=>dirty['skill_strategy']=1);
+$('skPickDecay').addEventListener('input', ()=>dirty['pick_decay']=1);
+$('skReqDecay').addEventListener('input', ()=>dirty['require_decay']=1);
+$('wordSearch').addEventListener('input', e=>renderWords(e.target.value));
+
+connectLogs();
+refreshState();
+loadSkills();
+setInterval(refreshState, 1500);
+</script>
+</body>
+</html>
