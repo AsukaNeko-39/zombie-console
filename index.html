@@ -163,6 +163,11 @@
     border:1px solid #7a2a2f;background:#1a1012;color:#ffd8d5;font-family:Consolas,monospace;
   }
   #offline button{padding:5px 11px;font-size:12px;border-radius:6px;border-color:#7a2a2f;background:#3d1618;color:#ffb3ae}
+  #offline .go{
+    padding:5px 11px;font-size:12px;border-radius:6px;text-decoration:none;font-weight:600;
+    background:#12261a;border:1px solid #1f6b3a;color:#7ee2a8;white-space:nowrap;
+  }
+  #offline .go:hover{background:#16331f;border-color:#2b8c4d}
   #offline .x{border:none;background:transparent;color:#8b6a6a;padding:0 3px;font-size:14px}
   #toast{
     position:fixed;left:50%;top:16px;transform:translateX(-50%) translateY(-70px);
@@ -182,9 +187,10 @@
 </head>
 <body>
 <div id="offline">
-  <span>⚠ 没连上本机后台服务：<b id="offlineMsg">控制台没启动</b></span>
+  <span>⚠ <b id="offlineMsg">没连上本机后台服务</b></span>
+  <a class="go" href="http://127.0.0.1:8770/">打开本机控制台 ↗</a>
   <input id="backendInput" spellcheck="false" placeholder="http://127.0.0.1:8770">
-  <button onclick="saveBackend()">连接</button>
+  <button onclick="saveBackend()">换个地址</button>
   <button class="x" onclick="hideOffline()" title="先关掉这条提示">×</button>
 </div>
 <div class="app">
