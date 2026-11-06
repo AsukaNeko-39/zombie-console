@@ -190,7 +190,7 @@
   <span>⚠ <b id="offlineMsg">没连上本机后台服务</b></span>
   <a class="go" href="http://127.0.0.1:8770/">打开本机控制台 ↗</a>
   <input id="backendInput" spellcheck="false" placeholder="http://127.0.0.1:8770">
-  <button onclick="saveBackend()">换个地址</button>
+  <button onclick="retryConnect()">连接</button>
   <button class="x" onclick="hideOffline()" title="先关掉这条提示">×</button>
 </div>
 <div class="app">
@@ -368,13 +368,26 @@ function setOffline(on, msg){
   }
 }
 function hideOffline(){ offlineHidden = true; $('offline').classList.remove('on'); }
-function saveBackend(){
+async function retryConnect(){
+  /* 关键：请求必须在点击回调里直接发出。
+     Chrome 对"公网页面访问 127.0.0.1"要弹一次本地网络权限，没有用户手势就默默拒绝。 */
   const v = ($('backendInput').value || '').trim().replace(/\/+$/, '');
-  if(!/^https?:\/\/[^\s]+$/.test(v)){ toast('地址要写成 http://127.0.0.1:8770 这样', true); return; }
-  localStorage.setItem('zc_backend', v);
-  API_BASE = v;
+  if(/^https?:\/\/[^\s]+$/.test(v) && v !== API_BASE){
+    API_BASE = v;
+    localStorage.setItem('zc_backend', v);
+  }
   offlineHidden = false;
-  location.reload();
+  const r = await api('/api/state');
+  if(r && !r.__offline && r.state){
+    setOffline(false);
+    fieldsBuilt = false;
+    await refreshState();
+    loadSkills();
+    connectLogs();
+    toast('已连上本机后台');
+  }else{
+    toast('还是连不上：先双击「启动控制台(后台).vbs」', true);
+  }
 }
 
 function toast(msg, isErr){
