@@ -519,7 +519,9 @@ async function refreshState(){
   const emuInfo = s.emu || {};
   $('dvEmu').textContent = dv.emulator || (emuInfo.online ? 'MuMu 实例 ' + (emuInfo.instance ?? '-') : '--');
   $('dvDev').textContent = dv.device || cfg.device || '--';
-  $('dvScr').textContent = dv.screen || emuInfo.screen || '--';
+  const scrOvr = emuInfo.screen_override, scrNat = emuInfo.screen_native;
+  $('dvScr').textContent = scrOvr ? (scrOvr + '（脚本）')
+                        : (scrNat || dv.screen || emuInfo.screen || '--');
 
   // 模拟器状态与按钮
   const emu = s.emu || {};
